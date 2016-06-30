@@ -3,24 +3,24 @@
 
 import praw, bs4, re, os, time, math, datetime
 
-if os.path.isfile("checked.txt") == False:
-    checked = []
-else:
-    file = open("checked.txt", "r")
-    checked = file.read()
-    checked = checked.split("\n")
-    checked = list(set(checked))
-    file.close()
+if not os.path.isfile("checked.txt"):
+    os.mknod("checked.txt")
 
 # Bot login details
 USERNAME = "AutoMobBot"
 PASSWORD = "<Password>"
+CLIENT_ID = "<ID>"
+SECRET = "<SECRET>"
 
 # Subreddit to scan
 SUBREDDIT = "needamod"
 
 # Credit left at the end of every bot message
-CREDIT = "\n\n---\n\n^I ^am ^a ^bot. [^Feedback](https://www.reddit.com/message/compose?to=%2Fr%2FAutoMobBot&subject=NeedAMod%20Bot&message=) ^| [^Source ^Code](https://github.com/Matthewmob/needamod-bot)"
+CREDIT = """
+
+---
+
+^I ^am ^a ^bot. [^Feedback](/message/compose?to=%2Fr%2FAutoMobBot&subject=NeedAMod%20Bot&message=) ^| [^Source ^Code](https://github.com/Matthewmob/needamod-bot)"
 
 # Delay between checks (in seconds)
 LOOP_DELAY = 900
@@ -29,15 +29,26 @@ LOOP_DELAY = 900
 GET_POSTS = 5
 
 UA = "/r/NeedAMod Automate Commenter (Update 19) by /u/MatthewMob"
+
+class Reddit(praw.Reddit):
+    def login(self, username, password, client_id, secret):
+        self.clear_authentication()
+        self.set_oauth_app_info(client_id, secret, '')
+        r.config.user = username
+        r.config.pswd = password
+        r.config.grant_type = "password"
+        r.config.api_request_delay = 1.0
+        r.get_access_information('code')
+
 r = praw.Reddit(UA)
-r.login(USERNAME, PASSWORD, disable_warning=True)
+r.login(USERNAME, PASSWORD, CLIENT_ID, SECRET)
 
 def commentSub(sub, post):
     try:
         m = r.get_subreddit(sub, fetch=True)
 
         d1 = datetime.datetime.utcfromtimestamp(m.created_utc)
-        com = "Subreddit Info (/r/" + m.display_name + "):\n\n**Age**: " + str((datetime.datetime.now() - d1).days) + " days\n\n**Subscribers**: " + str(m.subscribers) + "\n\n**Current Mods**: " + str(len(m.get_moderators())) + "\n\n**Over 18**: " + str(m.over18) + CREDIT
+        com = "Subreddit Info (/r/{display_name}):\n\n**Age**: " + str((datetime.datetime.now() - d1).days) + " days\n\n**Subscribers**: " + str(m.subscribers) + "\n\n**Current Mods**: " + str(len(m.get_moderators())) + "\n\n**Over 18**: " + str(m.over18) + CREDIT
         
         print("\nCommenting Sub Info")
         print("Commenting on: " + post.id)
@@ -67,21 +78,21 @@ def minDif(post):
     
     if dif > 5:
         return True
-    else:
-        print("Submission too new\n")
-        return False
+    print("Submission too new\n")
+    return False
 
 def postTitle(post):
     getsub = re.findall("\/r\/[a-zA-Z]+", post.title, re.DOTALL)
-    if getsub != None and len(getsub) > 0:
+    if getsub:
         href = getsub[0] + "/"
         getsub = findSub(href)
         commentSub(getsub[0], post)
         return True
-    else:
-        return False
+    return False
 
 while True:
+    with open("checked.txt", "r") as f:
+        checked = set(file.read().split())
     print("Checks started\n")
     try:
         submissions = r.get_subreddit(SUBREDDIT).get_new(limit=GET_POSTS)
@@ -92,31 +103,29 @@ while True:
         print("Checking " + submission.id + "\n")
         if submission.id not in checked and minDif(submission):
             if submission.link_flair_text != "offer to mod":
-                if submission.is_self:
-                    if postTitle(submission) == False and submission.selftext:
-                        soup = bs4.BeautifulSoup(submission.selftext_html, "lxml")
-                        a = soup.find_all("a", href=True)
-                        if a and len(a) > 0:
-                            href = a[0]["href"] + "/"
-                            getsub = findSub(href)
-                            if getsub != None and len(getsub) > 0:
-                                commentSub(getsub[0], submission)
+                if (submission.is_self and not postTitle(submission) and
+                    submission.selftext):
+                    soup = bs4.BeautifulSoup(submission.selftext_html, "lxml")
+                    a = soup.find_all("a", href=True)
+                    if a:
+                        href = a[0]["href"] + "/"
+                        getsub = findSub(href)
+                        if getsub:
+                            commentSub(getsub[0], submission)
                 elif not submission.is_self:
                     href = submission.url + "/"
                     getsub = re.findall("\/r\/(.*?)\/", href, re.DOTALL)
-                    if getsub != None and len(getsub) > 0:
+                    if getsub:
                         commentSub(getsub[0], submission)
                     else:
                         postTitle(submission)
             else:
                 commentOffer(submission)
 
-            checked.append(submission.id)
+            checked.add(submission.id)
 
-    file = open("checked.txt", "w")
-    for post_id in checked:
-        file.write(post_id + "\n")
-    file.close()
+    with open("checked.txt", "w") as f:
+        f.write("\n".join(checked))
     print("Checks finished\n")
 
     time.sleep(LOOP_DELAY)
